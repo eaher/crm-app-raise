@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 declare global {
@@ -10,59 +10,78 @@ declare global {
 }
 
 export function LoginForm() {
-  const btnRef = useRef<HTMLDivElement>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const btnRef = useRef<HTMLDivElement>(null); // contenedor para el botón de Google
 
   useEffect(() => {
-    // Cargar Google Identity Services
-    const s = document.createElement("script");
-    s.src = "https://accounts.google.com/gsi/client";
-    s.async = true;
-    s.defer = true;
-    s.onload = () => {
-      window.google?.accounts.id.initialize({
-        client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
-        callback: async (resp: any) => {
-          try {
-            const r = await fetch("/api/auth/session", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ credential: resp.credential }),
-            });
-            if (!r.ok) {
-              const data = await r.json().catch(() => ({}));
-              setMsg(data?.error || "Acceso denegado.");
-              return;
-            }
-            // Redirige a la ruta solicitada originalmente o al home
-            const p = new URLSearchParams(location.search);
-            const redirect = p.get("redirect") || "/";
-            location.href = redirect;
-          } catch {
-            setMsg("Error de conexión. Intenta de nuevo.");
-          }
-        },
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      setMsg("Falta NEXT_PUBLIC_GOOGLE_CLIENT_ID");
+      console.error("Falta NEXT_PUBLIC_GOOGLE_CLIENT_ID");
+      return;
+    }
+
+    const handleCredentialResponse = async (response: any) => {
+      setMsg(null);
+      try {
+        const res = await fetch("/api/auth/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ credential: response.credential }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          setMsg(data?.error || "Acceso denegado.");
+          return;
+        }
+
+        const p = new URLSearchParams(location.search);
+        const redirect = p.get("redirect") || "/"; // sin basePath
+
+        location.href = redirect;
+      } catch (e) {
+        console.error(e);
+        setMsg("Error de conexión. Intenta nuevamente.");
+      }
+    };
+
+    const init = () => {
+      if (!window.google?.accounts?.id) return;
+
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: handleCredentialResponse,
       });
 
-      // Render del botón oficial de Google (texto oscuro, fondo blanco)
+      // Render del botón oficial de Google (look blanco + texto oscuro)
       if (btnRef.current) {
-        window.google?.accounts.id.renderButton(btnRef.current, {
-          type: "standard",
-          size: "large",
+        window.google.accounts.id.renderButton(btnRef.current, {
           theme: "outline",
-          text: "signin_with",
+          size: "large",
+          text: "continue_with",
           shape: "pill",
           logo_alignment: "left",
           width: 320,
         });
       }
     };
-    document.head.appendChild(s);
 
-    // Mensajes desde el querystring (opcional)
-    const p = new URLSearchParams(location.search);
-    if (p.get("error") === "not-allowed") setMsg("Tu usuario no está habilitado.");
-    if (p.get("error") === "session") setMsg("Sesión inválida o expirada.");
+    if (window.google?.accounts?.id) {
+      init();
+    } else {
+      const s = document.createElement("script");
+      s.src = "https://accounts.google.com/gsi/client";
+      s.async = true;
+      s.defer = true;
+      s.onload = init;
+      document.body.appendChild(s);
+    }
+
+    // mensajes de error por querystring (opcional)
+    const qs = new URLSearchParams(location.search);
+    if (qs.get("error") === "not-allowed") setMsg("Tu usuario no está habilitado.");
+    if (qs.get("error") === "session") setMsg("Sesión inválida o expirada.");
   }, []);
 
   return (
@@ -89,7 +108,7 @@ export function LoginForm() {
           </p>
         )}
 
-        {/* Botón oficial de Google */}
+        {/* Aquí se renderiza el botón oficial de Google */}
         <div className="flex justify-center">
           <div ref={btnRef} />
         </div>
