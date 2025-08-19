@@ -11,7 +11,7 @@ declare global {
 
 export function LoginForm() {
   const [msg, setMsg] = useState<string | null>(null);
-  const btnRef = useRef<HTMLDivElement>(null); // contenedor para el botón de Google
+  const btnRef = useRef<HTMLDivElement>(null); // contenedor del botón Google
 
   useEffect(() => {
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
@@ -37,8 +37,7 @@ export function LoginForm() {
         }
 
         const p = new URLSearchParams(location.search);
-        const redirect = p.get("redirect") || "/"; // sin basePath
-
+        const redirect = p.get("redirect") || "/dashboard"; // 👈 acá el cambio
         location.href = redirect;
       } catch (e) {
         console.error(e);
@@ -48,13 +47,10 @@ export function LoginForm() {
 
     const init = () => {
       if (!window.google?.accounts?.id) return;
-
       window.google.accounts.id.initialize({
         client_id: clientId,
         callback: handleCredentialResponse,
       });
-
-      // Render del botón oficial de Google (look blanco + texto oscuro)
       if (btnRef.current) {
         window.google.accounts.id.renderButton(btnRef.current, {
           theme: "outline",
@@ -78,7 +74,6 @@ export function LoginForm() {
       document.body.appendChild(s);
     }
 
-    // mensajes de error por querystring (opcional)
     const qs = new URLSearchParams(location.search);
     if (qs.get("error") === "not-allowed") setMsg("Tu usuario no está habilitado.");
     if (qs.get("error") === "session") setMsg("Sesión inválida o expirada.");
@@ -93,10 +88,7 @@ export function LoginForm() {
         >
           Iniciar Sesión
         </CardTitle>
-        <CardDescription
-          className="text-slate-600"
-          style={{ fontFamily: "var(--font-open-sans)" }}
-        >
+        <CardDescription className="text-slate-600" style={{ fontFamily: "var(--font-open-sans)" }}>
           Accede a tu cuenta con Google
         </CardDescription>
       </CardHeader>
@@ -107,8 +99,6 @@ export function LoginForm() {
             {msg}
           </p>
         )}
-
-        {/* Aquí se renderiza el botón oficial de Google */}
         <div className="flex justify-center">
           <div ref={btnRef} />
         </div>

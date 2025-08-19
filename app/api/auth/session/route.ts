@@ -1,5 +1,6 @@
 // app/api/auth/session/route.ts
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { OAuth2Client } from "google-auth-library";
 import * as jose from "jose";
 
@@ -11,6 +12,20 @@ const SECRET = new TextEncoder().encode(process.env.SESSION_JWT_SECRET!);
 
 const oAuthClient = new OAuth2Client(CLIENT_ID);
 
+type AllowResp = { allow?: boolean };
+
+export async function GET() {
+  // Devuelve info mínima de sesión (email) si el JWT es válido
+  try {
+    const token = cookies().get(COOKIE)?.value;
+    if (!token) return NextResponse.json({ email: null }, { status: 200 });
+    const { payload } = await jose.jwtVerify(token, SECRET, { algorithms: ["HS256"] });
+    return NextResponse.json({ email: payload.email ?? null }, { status: 200 });
+  } catch {
+    return NextResponse.json({ email: null }, { status: 200 });
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const { credential } = await req.json();
@@ -18,7 +33,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "missing-credential" }, { status: 400 });
     }
 
-    // 1) Verificar ID token con Google
+    // 1) Verificar ID Token de Google
     const ticket = await oAuthClient.verifyIdToken({
       idToken: credential,
       audience: CLIENT_ID,
@@ -31,44 +46,47 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "email-not-verified" }, { status: 401 });
     }
 
-    // 2) Consultar Apps Script (allowlist en Sheet)
-    const allow = await fetch(APPS_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-      cache: "no-store",
-    }).then(r => r.json()).catch(() => ({ allowed: false }));
+    // 2) Chequear allowlist opcional vía Apps Script (espera {allow:true})
+    let allowed = true;
+    try {
+      const r = await fetch(APPS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (r.ok) {
+        const data = (await r.json()) as AllowResp;
+        allowed = Boolean(data?.allow ?? true);
+      }
+    } catch {
+      // Si falla el allowlist, por defecto dejamos pasar (ajusta a tu gusto)
+      allowed = true;
+    }
 
-    if (!allow?.allowed) {
+    if (!allowed) {
       return NextResponse.json({ error: "not-allowed" }, { status: 403 });
     }
 
-    // 3) Emitir JWT en cookie HttpOnly
-    const now = Math.floor(Date.now() / 1000);
-    const exp = now + MAX_DAYS * 24 * 60 * 60;
-
-    const token = await new jose.SignJWT({
-      sub: email,
-      name: payload?.name,
-      picture: payload?.picture,
-      iss: "crm-app",
-    })
-      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-      .setIssuedAt(now)
-      .setExpirationTime(exp)
+    // 3) Firmar JWT y setear cookie
+    const expSec = Math.floor(Date.now() / 1000) + MAX_DAYS * 24 * 60 * 60;
+    const jwt = await new jose.SignJWT({ email })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt()
+      .setExpirationTime(expSec)
       .sign(SECRET);
 
     const res = NextResponse.json({ ok: true });
-    res.cookies.set(COOKIE, token, {
+    res.cookies.set(COOKIE, jwt, {
       httpOnly: true,
       secure: true,
       sameSite: "lax",
       path: "/",
-      maxAge: exp - now,
+      maxAge: MAX_DAYS * 24 * 60 * 60,
     });
     return res;
   } catch (e) {
-    return NextResponse.json({ error: "invalid-token" }, { status: 401 });
+    console.error(e);
+    return NextResponse.json({ error: "invalid-credential" }, { status: 401 });
   }
 }
 

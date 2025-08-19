@@ -2,46 +2,59 @@
 import { NextResponse, NextRequest } from "next/server";
 import * as jose from "jose";
 
-const BASE = "/crm";
 const COOKIE = process.env.SESSION_COOKIE_NAME ?? "__session";
-const SECRET = new TextEncoder().encode(process.env.SESSION_JWT_SECRET!);
+const SECRET_RAW = process.env.SESSION_JWT_SECRET;
 
 const PUBLIC_PATHS = [
-  `${BASE}/login`,
-  `${BASE}/api/auth/session`,
+  "/",                 // redirige a /login
+  "/login",            // login
+  "/api/auth/session", // login/logout/session info
   "/favicon.ico",
   "/robots.txt",
   "/manifest.webmanifest",
 ];
 
-function isPublic(req: NextRequest) {
-  const { pathname } = req.nextUrl;
-  if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) return true;
+function isPublic(pathname: string) {
+  if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p))) return true;
   if (pathname.startsWith("/_next") || pathname.startsWith("/public")) return true;
   return false;
 }
 
+const PROTECTED_PREFIXES = ["/dashboard", "/ventas", "/finanzas", "/soporte", "/accounting"];
+
 export async function middleware(req: NextRequest) {
-  if (isPublic(req)) return NextResponse.next();
+  const { pathname, search } = req.nextUrl;
+
+  if (isPublic(pathname)) {
+    // Dejar pasar paths públicos
+    return NextResponse.next();
+  }
+
+  const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));
+  if (!isProtected) {
+    // Cualquier otro path no listado se considera público por ahora
+    return NextResponse.next();
+  }
 
   const token = req.cookies.get(COOKIE)?.value;
-  if (!token) {
-    const url = req.nextUrl.clone();
-    url.pathname = `${BASE}/login`;
-    url.searchParams.set("redirect", req.nextUrl.pathname + req.nextUrl.search);
+  if (!token || !SECRET_RAW) {
+    const url = new URL("/login", req.url);
+    url.search = "?error=session";
     return NextResponse.redirect(url);
   }
 
   try {
-    await jose.jwtVerify(token, SECRET);
+    await jose.jwtVerify(token, new TextEncoder().encode(SECRET_RAW), { algorithms: ["HS256"] });
     return NextResponse.next();
   } catch {
-    const url = new URL(`${BASE}/login?error=session`, req.url);
+    const url = new URL("/login", req.url);
+    url.search = "?error=session";
     return NextResponse.redirect(url);
   }
 }
 
-// Ejecutar SOLO bajo /crm/*
 export const config = {
-  matcher: ["/crm/:path*"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico).*)",
+  ],
 };

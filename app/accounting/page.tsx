@@ -1,0 +1,4 @@
+// app/accounting/page.tsx
+export default function AccountingPage() {
+  return <div className="p-8"><h2 className="text-2xl font-semibold">Accounting</h2><p className="text-slate-600 mt-2">Aquí irá el módulo de accounting.</p></div>;
+}
